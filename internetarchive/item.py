@@ -841,6 +841,58 @@ class Item(BaseItem):
                 responses.append(resp)
         return responses
 
+    def sync_dir_to_item(self, local_dir, **upload_kwargs):
+        """Sync a local directory to an item.
+
+        :type local_dir: str
+        :param local_dir: The local directory to sync.
+
+        Usage::
+
+            >>> import internetarchive
+            >>> item = internetarchive.Item('identifier')
+            >>> r = item.sync_dir_to_item('/local/dir')
+
+        :rtype: requests.Response
+        :returns: A requests.Response object.
+        """
+        # Do not upload if there are ANY queued tasks to prevent race
+        # conditions.
+        if self.tasks:
+            raise Exception('Tasks are running. Wait.')
+
+        upload_kwargs['checksum'] = True
+        if not local_dir.endswith('/'):
+            local_dir += '/'
+
+        # Upload with checksum=True to sync new files to item.
+        upload_r = self.upload(local_dir, **upload_kwargs)
+        print(upload_r)
+
+        # Sync new metadata to item.
+        if 'metadata' in upload_kwargs:
+            metadata_r = self.modify_metadata(upload_kwargs['metadata'])
+            print(metadata_r, metadata_r.content)
+
+        local_sync_files = list()
+        for _, key in iter_directory(local_dir):
+            local_sync_files.append(key)
+
+        # Get a list of "sync" files in the item.
+        item_sync_files = list()
+        for f in self.get_files():
+            item_sync_files.append(f)
+
+        # Delete old "sync" files from the item.
+        for f in item_sync_files:
+            if f.name not in local_sync_files:
+                try:
+                    r = f.delete()
+                except HTTPError as exc:
+                    if 'Forbidden for url' in str(exc):
+                        continue
+                print(r, r.content)
+
 
 class Collection(Item):
     """This class represents an archive.org collection."""
